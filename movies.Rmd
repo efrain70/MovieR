@@ -1,0 +1,531 @@
+---
+title: "La Base de Datos sobre Películas"
+author: "Efraín Lima Miranda"
+date: "2 de enero de 2018"
+output:
+  github_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '2'
+lang: es
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## La Base de Datos sobre Películas
+
+> Descripción del dataset. ¿Por qué es importante y qué pregunta/problema pretende responder?
+
+El cine siempre es un tema de actualizad y desde que Hollywood lo convirtió en una industria del entretenimiento, ésta nunca ha parado de crecer. El *dataset* propuesto es un conjunto de datos recopilados por TMDb (https://www.themoviedb.org/) y GroupLends (https://grouplens.org/datasets/movielens/) que contiene los detalles de las películas, créditos y las palabras clave así como estadîsticas de las valoraciones de los usuarios. Los datos se han obtenido a través de la API proporcionada por TMDb (https://www.themoviedb.org/documentation/api). Además de estos datos se han añadido películas, miembros del reparto y créditos así como algunos programas de televisión.
+
+A partir de este conjunto de datos se pretende estudiar la evolución de la industria cinematográfica a lo largo de la historia. Nos centraremos en la influencia de los ingresos obtneidos con las puntuaciones del público.
+
+
+los la rentabilidad a lo largo de la historia de las películas dependiendo de los atributos proporcionados por el *dataset*.
+
+# Descripción del *dataset*
+
+Atributo | Descripción | Tipo
+------------------------ | ------------------------------------------------------------ | -----------------
+**adult** |  Indica si la película es valorada como X o para adultos. | Boolean 
+**belongs_to_collection** | Diccionario con la infomacion sobre a qué colección pertenece la película. | List )Strings)
+**budget** | El presupuesto total en dólares. | Float
+**genres** | Lista de diccionarios donde se listan todos los generos asignados a la película. | List (Strings) 
+**homepage** | Página oficial de la película. | String
+**id** | ID de la película. | String
+**imdb_id** | IMDB ID de la película. | String
+**original_language** | Idioma original en el que rodó la película. | String (factor)
+**original_title** | Título original de la película. | String
+**overview** | Reseña breve sobre la película. | String
+**popularity** | La puntuación de popularidad de TMDb. | Float
+**poster_path** | URL del póster de la película. | String
+**production_companies** | Lista de compañías de producción involucradas en la películas. | List (Strings)
+**production_countries** | Lista de países donde la película ha sido producida. | List (Strings)
+**release_date** | Fecha de lanzamiento de la película. | Date
+**revenue** | Total de ingresos en dólares. | Float
+**runtime** | Duración de la película en minutos. | Float
+**spoken_languages** | Lista de los idiomas hablados en la película. | List (Strings)
+**status** | Estado de la película: (Released, To Be Released, Announced, etcétera). | String (factor)
+**tagline** | Eslogan de la película. | String
+**title** | Título oficial de la película. | String
+**video** | Indica existe un vídeo en TMDb | Boolean
+**vote_average** | Media de las valoraciones de la película | Float
+**vote_count** | Número de votos de los usuarios de TMBD | Integer
+
+```{r}
+file_data_path  = "../dataset/movies_metadata.csv"
+data_movies = read.csv2(file=file_data_path,
+                        sep=',', 
+                        header=TRUE, dec='.',
+                        strip.white=TRUE)
+```
+
+```{r}
+sapply(data_movies, class)
+```
+
+```{r}
+sapply(data_movies, typeof)
+```
+
+
+# Limpieza de los datos.
+> Selección de los datos de interés a analizar. ¿Cuáles son los campos más relevantes para responder al problema?
+> ¿Los datos contienen ceros o elementos vacíos? ¿Y valores extremos? ¿Cómo gestionarías cada uno de estos casos?
+
+Inicialmente usaremos para nuestro problema los datos que relacionados con aspectos económicos (budget, revenue), de aceptación por el público (popularity, vote_count, vote_average) y algunas características de las películas (title, runtime, release_date)
+
+```{r}
+columns <- c('title', 'imdb_id', 'budget' , 'revenue', 'popularity', 'vote_count', 'vote_average', 'title', 'runtime', 'release_date')
+movies <- data_movies[ , columns]
+
+```
+Al analizar visualmente el *dataset* nos encontramos con que hay tres entradas donde los datos no se han grabado correctamente. (por ejemplo la entrada con el índice número 35588).
+
+Consultando manualmente los datos de la tabla se observa que las entradas erróneas aparecen como desplazadas 4 posiciones a la izquierda y le faltan muchos datos claves como el identificadorp . Al ser sólo tres entradas del conjunto de datos y de las que no tenemos información suficiente para su recuperación, las ignoraremos. 
+
+
+```{r}
+bad_index <- (data_movies$adult != 'True' & data_movies$adult != 'False')
+movies <- movies[!bad_index, ]
+```
+
+
+Para evitar confusiones con los valores numéricos que son Null, vacíos, con los valores 0 los transformamos a NA:
+
+```{r}
+# budget, popularity, revenue, runtime
+movies$budget  <- as.numeric(as.character(movies$budget))
+movies$popularity <- as.numeric(as.character(movies$popularity))
+movies$revenue  <- as.numeric(as.character(movies$revenue))
+movies$runtime  <- as.numeric(as.character(movies$runtime))
+
+movies$budget[movies$budget == 0] <- NA
+movies$popularity[movies$popularity == 0] <- NA
+movies$revenue[movies$revenue == 0] <- NA
+movies$runtime[movies$runtime == 0] <- NA
+
+```
+
+Las películas sin títulos las consideramos no válidas, las eliminamos:
+
+```{r}
+movies <- movies[movies$title != '', ]
+movies$title <- as.character(movies$title)
+```
+
+
+También convertimos la fecha de release en el tipo Date, los datos vacíos se convierten a NA automáticamente:
+
+```{r}
+movies$release_date <- as.Date(as.character(movies$release_date))
+```
+
+Para simplificar el estudio de los datos se añade una columna nueva para los años.
+
+```{r}
+movies$release_year <- as.numeric(format(movies$release_date, "%Y"))
+
+```
+
+
+```{r}
+sapply(movies, typeof)
+sapply(movies, class)
+
+```
+
+
+
+Con los datos ya limpios estudiamos los valores *outliers* del *dataset* para los atributos relevantes: budget y revenue.
+
+Consultando los datos de budget nos encontramos con valores un tanto sospechosos, valores muy bajos de dólares son anormales en la realidad el cine. Lo mismo podríamos decir de los valores de revenue. Estos *outliers* pueden deberse a un fallo en la conversión a un valor actual por la inflación de la moneda o simplemente a un error durante el proceso de captura. Dado lo costoso que sería una investigación de los problemas concretos, se ha optado por establecer un límite mínimo.
+
+
+
+```{r}
+
+movies <- movies[!is.na(movies$budget), ]
+movies <- movies[!is.na(movies$revenue), ]
+
+budget <- movies$budget[movies$budget < 200 & !is.na(movies$budget)]
+revenue <- movies$revenue[movies$revenue < 200 & !is.na(movies$revenue)]
+
+
+hist(budget, breaks=20)
+hist(revenue, breaks=20)
+
+
+```
+
+Observando los histogramas para valores menores de 200 para el budget y el revenue consideramos sólo las películas con budget y revenue superior a 200. 
+
+```{r}
+movies <- movies[movies$budget > 200 & !is.na(movies$budget), ]
+movies <- movies[movies$revenue > 200 & !is.na(movies$revenue), ]
+```
+
+Aunque con esta limpieza se haya reducido el número de instancias que tenemos como entrada, sus valores son consistentes y, aparentemente, reales. 
+
+```{r echo = FALSE, results = 'asis'}
+library(knitr)
+
+incomplete <- movies[!complete.cases(movies), ]
+kable(incomplete)
+```
+
+
+A pesar de eso, hay 11 instancias donde el runtime no aparece, consultando la base de datos de IMDB manualmente (http://www.imdb.com/) completamos estos datos:
+
+```{r}
+movies$runtime[movies$imdb_id=='tt1224449'] = 96
+movies$runtime[movies$imdb_id=='tt2456720'] = 96
+movies$runtime[movies$imdb_id=='tt0409527'] = 140
+movies$runtime[movies$imdb_id=='tt2550838'] = 86
+movies$runtime[movies$imdb_id=='tt2076251'] = 93
+movies$runtime[movies$imdb_id=='tt2321513'] = 103
+movies$runtime[movies$imdb_id=='tt0191076'] = 104
+movies$runtime[movies$imdb_id=='tt1107828'] = 130
+movies$runtime[movies$imdb_id=='tt1620549'] = 86
+movies$runtime[movies$imdb_id=='tt0477337'] = 108
+movies$runtime[movies$imdb_id=='tt1620464'] = 93
+
+```
+
+Ahora tenemos el conjunto de datos completo:
+
+```{r}
+incomplete <- movies[!complete.cases(movies), ]
+nrow(incomplete) == 0
+```
+
+En los datos actuales nos encontramos con el problema del valor medio de las votaciones para elementos donde éstas no son muy numerosas. Por ejemplo, si una película tiene muy pocos votos con una valoración alta, la media de esta podría no ser representativa Establecemos el límite mínimo de 1000 votos para nuestra muestra.
+
+```{r}
+movies <- movies[order(-movies$vote_count), ]
+movies = movies[movies$vote_count > 1000, ]
+
+```
+
+Para facilitar el estudio de este *dataset* se calcula una nueva característica que indica si la película se puede cosiderar de la generación actual.
+
+```{r}
+movies$old <- !movies$release_date > 1990
+
+```
+
+### Tabla con los números de Tukey
+
+
+```{r echo = FALSE, results = 'asis'}
+values_list <- lapply(movies, function(df){
+  if(is.numeric(df)) {
+    c(mean(df), fivenum(df)) 
+  }
+})
+
+table_values <- do.call(rbind.data.frame, values_list)
+colnames(table_values) <- c(
+  'mean',
+  'minimum', 'lower-hinge', 'median', 'upper-hinge', 'maximum')
+
+kable(table_values, caption = "Media y los cinco números de Tukey para las variables numéricas")
+```
+
+```{r  echo=TRUE, fig.width=7}
+par(mfrow = c(1, 2))
+for (i in 1:length(movies)) {
+  df <- movies[, i]
+  if(is.numeric(df)) {
+    boxplot(df, main=names(movies[i]), type="l", plot=TRUE, sub=paste("# Outliers: ", length(boxplot.stats(df)$out)))
+  }
+}
+
+```
+
+Consultando la tabla con el resumen con los números de Tukey y los *boxplots* se pueden observar como hay muchos valores que podrían ser *outliers*. Si observamos más detenidamente estos valores nos damos cuenta que, a pesar de ser *valores extremos*, son válidos y enriquecen con su diversidad la muestra.  Por lo tanto, no realizamos ninguna actividad sobre ellos. Un ejemplo de esta situación son los referidos a *release_year*, los valores mostrados como *outliers* son consecuencia de las votaciones que realizan mayoritariamente sobre películas actuales, pero sin olvidar los clásicos de la industria. 
+
+
+# Análisis de los datos.
+> Selección de los grupos de datos que se quieren analizar/comparar.
+> Comprobación de la normalidad y homogeneidad de la varianza. Si es necesario (y posible), aplicar transformaciones que normalicen los datos.
+> Aplicación de pruebas estadísticas (tantas como sea posible) para comparar los grupos de datos.
+
+## Comprobación de la normalidad
+
+Para comprobar la normalidad mostraremos los histogramas juntos con su función de densidad y de la normal con la media y varianza correspondiente. A la derecha del histograma se dibuja también la gráfica Q-Q (Quantile-Quantile Plot) junto con la línea Q de la distribución normal.
+
+```{r  echo=TRUE, warning=FALSE, out.width = "90%"}
+library(nortest)
+
+par(mfrow = c(1, 2))
+
+for (i in 1:length(movies)) {
+  data <- movies[, i]
+  
+  if(is.numeric(data)) {
+    label = names(movies[i])
+    # Histogram
+    hist(data, density=50, breaks=50, xlab=label, main=paste('Histogram of', label), freq=FALSE)
+    
+    lines(density(data), col='blue')
+    curve(dnorm(x, mean=mean(data), sd=sd(data)), add=TRUE, col='red')
+    legend("center", c("Density", "Normal"), col=c("blue", "red"), lwd=1)
+    
+    # Anderson-Darling normality test
+    main_label <- paste('Quantile-Quantile Plots of', label)
+    x_label <- paste("Theoretical Quantiles")
+    qqnorm(data, col="orange", pch=20, main=main_label, xlab=x_label, frame.plot = FALSE)
+    qqline(data, col="brown", distribution=qnorm)
+    legend("topleft", c("Norm", "Q-Q"), col=c("brown", "orange"), lwd=1)
+  }
+}
+
+```
+
+```{r results = 'asis'}
+library(nortest)
+library(e1071)                    
+
+test_in_df <- function(test_name) {
+    result <- lapply(movies, function(test_data){
+        if(is.numeric(test_data)) {
+          result_test <- do.call(test_name, list(test_data))
+          c(result_test[0], result_test[1], result_test[2])
+        }
+        
+    })
+    result <- result[lapply(result,length)>0]
+    
+    result_df <- do.call(rbind.data.frame, result)
+    return(result_df)
+}
+
+ad_test <- test_in_df('ad.test')
+shapiro_test <- test_in_df('shapiro.test')
+```
+```{r}
+kable(ad_test)
+kable(shapiro_test)
+```
+
+
+Observando las gráficas mostradas anteriormente podríamos afirmar a simple vista que las variables vote_average y runtime siguen una distribución normal. Cuando comprobamos analíticamente la normalidad de los datos usando los tests Shapiro (Shapiro https://en.wikipedia.org/wiki/Shapiro%E2%80%93Wilk_test) y Anderson-Darling (https://en.wikipedia.org/wiki/Anderson%E2%80%93Darling_test) solamente en vote_average nos encontramos con un p-valor superior a 0.05, es decir, podemos aceptar la hipótesis de normalidad para esta variables.
+
+
+## Homogeneidad de la varianza
+
+A través de boxplots comprobamos la homogenidad de la varianza (homocedasticidad) de las películas etiquetadas como antiguas y las nuevas. 
+
+```{r}
+library(ggplot2)
+
+for (i in 1:length(movies)) {
+  data <- movies[, i]
+  label = names(movies[i])
+
+  if(is.numeric(data)) {
+    print(ggplot(data = movies, aes(x = old, y = data, colour = old, main=label)) + 
+            geom_boxplot() + theme_bw() + labs(title = label))
+  }
+}
+```
+
+```{r results = 'asis'}
+var_test_df <- function() {
+  
+    result <- lapply(movies, function(data){
+        if(is.numeric(data)) {
+          result_test <- var.test(data[movies$old], data[!movies$old])
+          c(result_test[0], result_test[1], result_test[3])
+        }
+        
+    })    
+    result = result[lapply(result, length) > 0]
+
+    result_df <- do.call(rbind.data.frame, result)
+    return(result_df)
+}
+
+bartlett_test_df <- function() {
+  
+    result <- lapply(movies, function(data){
+        if(is.numeric(data)) {
+          result_test <- bartlett.test(list(data[movies$old], data[!movies$old]))
+          c(result_test[0], result_test[1], result_test[3])
+        }
+        
+    })    
+    result = result[lapply(result, length) > 0]
+
+    result_df <- do.call(rbind.data.frame, result)
+    return(result_df)
+}
+
+var_test <- var_test_df()
+kable(var_test)
+bartlett_test <- bartlett_test_df()
+kable(bartlett_test)
+
+```
+
+
+En las gráficas anteriores se aprecia que la única característica donde la varianza es semejante es la duracción de la película (runtime). Analíticamente a traves del test F-test (https://en.wikipedia.org/wiki/F-test) y el test Bartlett (http://www.itl.nist.gov/div898/handbook/eda/section3/eda357.htm) podemos validar esta afirmación ya que su p-valr es superior a 0.05.
+
+
+## Pruebas estadísticas 
+
+### Matriz de correlación
+```{r}
+nums <- sapply(movies, is.numeric)
+movies_nums <- movies[ ,nums]
+
+kable(cor(movies_nums))
+kable(cor(movies_nums[movies$old, ]))
+kable(cor(movies_nums[!movies$old, ]))
+
+
+```
+
+### Gráficas de regresión lineal 
+
+```{r}
+plot(revenue ~ vote_count, data = movies[!movies$old, ], col = 'blue', main="Vote count ~ Revenue")
+par(new=TRUE)
+plot(revenue ~ vote_count, data = movies[movies$old, ], col = 'green', xlab="", ylab="")
+with(movies[movies$old, ], lines(loess.smooth(vote_count, revenue), col = "green"))
+with(movies[!movies$old, ], lines(loess.smooth(vote_count, revenue), col = "blue"))
+with(movies, lines(loess.smooth(vote_count, revenue), col = "red"))
+legend("topleft", c("Total", "Old", "New"), col=c("red", "green", "blue"), lwd=1)
+
+
+plot(revenue ~ budget, data = movies[!movies$old, ], col = 'blue', main="Budget ~ Revenue")
+par(new=TRUE)
+plot(revenue ~ budget, data = movies[movies$old, ], col = 'green', xlab="", ylab="")
+with(movies[movies$old, ], lines(loess.smooth(budget, revenue), col = "green"))
+with(movies[!movies$old, ], lines(loess.smooth(budget, revenue), col = "blue"))
+with(movies, lines(loess.smooth(budget, revenue), col = "red"))
+legend("topleft", c("Total", "Old", "New"), col=c("red", "green", "blue"), lwd=1)
+
+
+```
+
+### Kruskal-Wallis Test
+
+```{r}
+kruskal.test(movies$revenue, movies$vote_count)
+
+kruskal.test(movies$revenue[movies$old], movies$vote_count[movies$old])
+kruskal.test(movies$revenue[!movies$old], movies$vote_count[!movies$old])
+
+kruskal.test(movies$revenue, movies$budget)
+
+kruskal.test(movies$revenue[movies$old], movies$budget[movies$old])
+kruskal.test(movies$revenue[!movies$old], movies$budget[!movies$old])
+
+
+```
+
+
+### Wilcoxon Rank Test
+
+```{r}
+
+wilcox_test_df <- function() {
+  
+    result <- lapply(movies, function(data){
+        if(is.numeric(data)) {
+          result_test <- wilcox.test(data[movies$old], data[!movies$old])
+          c(result_test[0], result_test[1], result_test[3])
+        }
+        
+    })    
+    result = result[lapply(result, length) > 0]
+
+    result_df <- do.call(rbind.data.frame, result)
+    return(result_df)
+}
+
+wil_test <- wilcox_test_df()
+kable(wil_test)
+
+```
+
+# Tablas y gráficas
+
+> Representación de los resultados a partir de tablas y gráficas.
+
+Además de las gráficas propuestas a lo largo de este estudio, se presentan a continuación una representación de los datos en tablas resúmenes y gráficos.
+
+## Tablas Top5
+
+### Películas con mayor *budget*
+
+```{r results = 'asis'}
+
+kable(movies[order(-movies$budget), ][1:5, ])
+
+```
+### Películas con mayor *revenue*
+
+```{r results = 'asis'}
+
+kable(movies[order(-movies$revenue), ][1:5, ])
+
+```
+
+### Películas más populares
+
+```{r results = 'asis'}
+
+kable(movies[order(-movies$popularity), ][1:5, ])
+
+```
+
+### Películas con mejor puntiación
+
+```{r results = 'asis'}
+
+kable(movies[order(-movies$vote_average), ][1:5, ])
+
+```
+
+
+## Histogramas temporales
+
+
+### Películas por fecha
+```{r}
+hist(movies$release_year, breaks = 150)
+```
+
+### Evolución del *Revenue* 
+```{r}
+ggplot(movies, aes(x=release_year, y=revenue)) + 
+    stat_summary(fun.y = mean, na.rm = TRUE, group = 1, color = 'black', geom ='line')
+```
+### Evolución del *Budget* 
+```{r}
+ggplot(movies, aes(x=release_year, y=budget)) + 
+    stat_summary(fun.y = mean, na.rm = TRUE, group = 1, color = 'black', geom ='line')
+```
+
+### Evolución de las *valoraciones* 
+```{r}
+
+ggplot(movies, aes(x=release_year, y=vote_average)) + 
+    stat_summary(fun.y = mean, na.rm = TRUE, group = 10, color = 'black', geom ='line')
+```
+
+# Conclusiones
+> Resolución del problema. A partir de los resultados obtenidos, ¿cuáles son las conclusiones? ¿Los resultados permiten responder al problema?
+
+A lo largo de este estudio se ha investigado qué relación tiene los ingresos obtenidos con las valoraciones de los usuarios. 
+
+El número de películas producidas se ha incrementando sustancialmente a lo largo de la historia, así como la inversión media de cada una. Al contrario que las valoraciones, las puntiaciones medias se han desplomado, los usuarios valora más positivamente las películas realizadas en el pasado con, en general, menos presupuesto.
+
+A pesar de esto, existe una clara relación directa entre el número de votos de lo usuarios con los ingresos obtendos por la película, es decir, cuanto más se invierta en la película más personas mayor será el público que la visionar. Pero esto no puede ser considerado un índice de satisfacción. 
+
+
